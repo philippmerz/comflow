@@ -38,12 +38,14 @@ const state = {
 
 const el = (id) => document.getElementById(id);
 const fmtUSD = (n) => {
+  if (n >= 1e12) return "$" + (n / 1e12).toFixed(n < 1e13 ? 2 : 1) + "T";
   if (n >= 1e9) return "$" + (n / 1e9).toFixed(n < 1e10 ? 2 : 1) + "B";
   if (n >= 1e6) return "$" + (n / 1e6).toFixed(1) + "M";
   if (n >= 1e3) return "$" + (n / 1e3).toFixed(0) + "K";
   return "$" + n;
 };
 const fmtT = (n) => {
+  if (n >= 1e9) return (n / 1e9).toFixed(n < 1e10 ? 2 : 1) + "Gt";
   if (n >= 1e6) return (n / 1e6).toFixed(1) + "Mt";
   if (n >= 1e3) return (n / 1e3).toFixed(0) + "kt";
   return n + " t";
@@ -214,6 +216,7 @@ function rebuildFlows() {
   out.sort((a, b) => a[state.measure] - b[state.measure]);
   state.flows = out;
   updateStat(out);
+  if (el("chips").children.length) updateChipVolumes(); // reflect period/measure
 }
 
 // build the moving pulses for the current time — a stream per line, wrapping
@@ -354,7 +357,10 @@ function buildChips() {
     chip.className = "chip on";
     chip.dataset.id = c.id;
     chip.innerHTML =
-      `<span class="dot" style="color:rgb(${c.color.join(",")})"></span>${c.label}`;
+      `<span class="dot" style="color:rgb(${c.color.join(",")})"></span>` +
+      `<span class="chip-text">` +
+      `<span class="chip-name">${c.label}</span>` +
+      `<span class="chip-vol"></span></span>`;
     chip.onclick = () => {
       if (state.active.has(c.id)) {
         state.active.delete(c.id); chip.classList.remove("on"); chip.classList.add("off");
@@ -364,6 +370,19 @@ function buildChips() {
       rebuildFlows();
     };
     box.appendChild(chip);
+  }
+  updateChipVolumes();
+}
+
+// the per-commodity total for the current period + measure, shown under each name
+function updateChipVolumes() {
+  const yr = currentPeriod();
+  for (const chip of el("chips").querySelectorAll(".chip")) {
+    const t = state.data.totals[chip.dataset.id] &&
+      state.data.totals[chip.dataset.id][yr];
+    const vol = chip.querySelector(".chip-vol");
+    vol.textContent = !t ? "—"
+      : state.measure === "v" ? fmtUSD(t.value_usd) : fmtT(t.tonnes);
   }
 }
 
