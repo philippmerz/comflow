@@ -4,7 +4,25 @@
 // continuous stream of glowing pulses flowing exporter -> importer along each
 // line. Colour encodes commodity; width, size and opacity scale with volume.
 
-const { Deck, MapView, GeoJsonLayer, PathLayer, ScatterplotLayer } = deck;
+const { Deck, MapView, GeoJsonLayer, PathLayer, IconLayer } = deck;
+
+// Soft radial-gradient glow sprite (white → transparent), tinted per pulse.
+// Rendered additively so overlapping glows bloom into a continuous soft ribbon
+// of light along each line rather than reading as hard discrete dots.
+function makeGlow() {
+  const s = 128, c = document.createElement("canvas");
+  c.width = c.height = s;
+  const ctx = c.getContext("2d");
+  const g = ctx.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+  g.addColorStop(0.0, "rgba(255,255,255,1)");
+  g.addColorStop(0.18, "rgba(255,255,255,0.5)");
+  g.addColorStop(0.45, "rgba(255,255,255,0.14)");
+  g.addColorStop(1.0, "rgba(255,255,255,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, s, s);
+  return c.toDataURL();
+}
+const GLOW = makeGlow();
 
 const DATA = "data/";
 const state = {
@@ -34,10 +52,10 @@ const fmtT = (n) => {
 const INITIAL_VIEW = { longitude: 13, latitude: 26, zoom: 0.6, pitch: 0, bearing: 0 };
 const MAX_WIDTH_PX = 6;    // widest static line
 const MIN_WIDTH_PX = 0.3;
-const PULSES = 3;          // pulses in flight per line at once → continuous stream
-const SPEED = 0.14;        // traversals per second (1 / seconds-per-trip)
-const DOT_MIN = 0.9, DOT_MAX = 4.4;  // pulse radius range (px)
-const FADE = 0.09;         // fraction of the path over which pulses fade in/out
+const PULSES = 6;          // glows in flight per line — enough to blend into a ribbon
+const SPEED = 0.12;        // traversals per second (1 / seconds-per-trip)
+const GLOW_MIN = 7, GLOW_MAX = 26;   // glow sprite size range (px) — soft & diffuse
+const FADE = 0.12;         // fraction of the path over which pulses fade in/out
 
 let deckgl;
 
@@ -153,9 +171,9 @@ function pointAt(path, f) {
 
 const norm = (d) => Math.sqrt(d[state.measure]) / Math.sqrt(state.maxByMeasure[state.measure]);
 const widthFor = (d) => MIN_WIDTH_PX + norm(d) * (MAX_WIDTH_PX - MIN_WIDTH_PX);
-const baseAlpha = (d) => Math.round(8 + norm(d) * 42);    // faint static line 8..50
-const dotAlpha = (d) => Math.round(70 + norm(d) * 175);   // pulse 70..245
-const dotRadius = (d) => DOT_MIN + norm(d) * (DOT_MAX - DOT_MIN);
+const baseAlpha = (d) => Math.round(10 + norm(d) * 46);   // faint static line 10..56
+const glowAlpha = (d) => Math.round(14 + norm(d) * 74);   // faint soft glow 14..88
+const glowSize = (d) => GLOW_MIN + norm(d) * (GLOW_MAX - GLOW_MIN);
 
 /* ---------- flow set ---------- */
 
@@ -187,7 +205,7 @@ function buildPulses() {
   const dots = [];
   const t = state.time;
   for (const d of state.flows) {
-    const rad = dotRadius(d), a = dotAlpha(d), col = d.color;
+    const sz = glowSize(d), a = glowAlpha(d), col = d.color;
     for (let j = 0; j < PULSES; j++) {
       let f = (t * SPEED + d.phase + j / PULSES) % 1;
       // fade near both ends so the wrap (dest -> source) is invisible
@@ -198,7 +216,7 @@ function buildPulses() {
       dots.push({
         position: pointAt(d.path, f),
         color: [col[0], col[1], col[2], Math.round(a * fade)],
-        radius: rad * (0.6 + 0.4 * fade),
+        size: sz,
       });
     }
   }
@@ -233,15 +251,17 @@ function draw() {
     pickable: true, onHover: onHover,
   });
 
-  const pulses = new ScatterplotLayer({
+  const pulses = new IconLayer({
     id: "pulses",
     data: buildPulses(),
+    iconAtlas: GLOW,
+    iconMapping: { g: { x: 0, y: 0, width: 128, height: 128, mask: true } },
+    getIcon: () => "g",
     getPosition: (d) => d.position,
-    getFillColor: (d) => d.color,
-    getRadius: (d) => d.radius,
-    radiusUnits: "pixels",
-    radiusMinPixels: 0.6,
-    stroked: false,
+    getColor: (d) => d.color,   // tints the white glow mask (rgb + alpha)
+    getSize: (d) => d.size,
+    sizeUnits: "pixels",
+    billboard: true,
     parameters: { depthTest: false, blend: true, blendFunc: [770, 1] }, // additive glow
   });
 
