@@ -216,7 +216,6 @@ function rebuildFlows() {
   out.sort((a, b) => a[state.measure] - b[state.measure]);
   state.flows = out;
   updateStat(out);
-  if (el("chips").children.length) updateChipVolumes(); // reflect period/measure
 }
 
 // build the moving pulses for the current time — a stream per line, wrapping
@@ -357,10 +356,7 @@ function buildChips() {
     chip.className = "chip on";
     chip.dataset.id = c.id;
     chip.innerHTML =
-      `<span class="dot" style="color:rgb(${c.color.join(",")})"></span>` +
-      `<span class="chip-text">` +
-      `<span class="chip-name">${c.label}</span>` +
-      `<span class="chip-vol"></span></span>`;
+      `<span class="dot" style="color:rgb(${c.color.join(",")})"></span>${c.label}`;
     chip.onclick = () => {
       if (state.active.has(c.id)) {
         state.active.delete(c.id); chip.classList.remove("on"); chip.classList.add("off");
@@ -369,21 +365,27 @@ function buildChips() {
       }
       rebuildFlows();
     };
+    chip.onmouseenter = chip.onmousemove = (e) => showChipTip(c, e);
+    chip.onmouseleave = () => { el("tooltip").hidden = true; };
     box.appendChild(chip);
   }
-  updateChipVolumes();
 }
 
-// the per-commodity total for the current period + measure, shown under each name
-function updateChipVolumes() {
-  const yr = currentPeriod();
-  for (const chip of el("chips").querySelectorAll(".chip")) {
-    const t = state.data.totals[chip.dataset.id] &&
-      state.data.totals[chip.dataset.id][yr];
-    const vol = chip.querySelector(".chip-vol");
-    vol.textContent = !t ? "—"
-      : state.measure === "v" ? fmtUSD(t.value_usd) : fmtT(t.tonnes);
-  }
+// hover a chip → tooltip with that commodity's total for the current period
+function showChipTip(c, e) {
+  const tip = el("tooltip");
+  const t = state.data.totals[c.id] && state.data.totals[c.id][currentPeriod()];
+  if (!t) { tip.hidden = true; return; }
+  tip.innerHTML =
+    `<div class="tt-comm"><span class="dot" style="color:rgb(${c.color.join(",")})"></span>${c.label}</div>` +
+    `<div class="tt-rows">` +
+    `<span class="k">Value</span><span class="v">${fmtUSD(t.value_usd)}</span>` +
+    `<span class="k">Weight</span><span class="v">${fmtT(t.tonnes)}</span>` +
+    `<span class="k">Routes</span><span class="v">${t.pairs}</span>` +
+    `</div>`;
+  tip.style.left = e.clientX + "px";
+  tip.style.top = e.clientY + "px";
+  tip.hidden = false;
 }
 
 function buildTimeline() {
