@@ -37,6 +37,12 @@ COMMODITIES = [
     {"id": "refined_copper", "hs4": "7403", "label": "Refined copper",    "color": [227, 122, 63]},
     {"id": "bauxite",        "hs4": "2606", "label": "Bauxite",           "color": [110, 176, 168]},
     {"id": "aluminium",      "hs4": "7601", "label": "Unwrought aluminium","color": [93, 150, 224]},
+    {"id": "ferro_alloys",   "hs4": "7202", "label": "Ferro-alloys",      "color": [200, 110, 165]},
+    {"id": "nickel",         "hs4": "7502", "label": "Nickel",            "color": [116, 199, 140]},
+    {"id": "zinc",           "hs4": "7901", "label": "Zinc",              "color": [130, 205, 215]},
+    {"id": "lead",           "hs4": "7801", "label": "Lead",              "color": [156, 138, 202]},
+    {"id": "tin",            "hs4": "8001", "label": "Tin",               "color": [206, 196, 138]},
+    {"id": "potash",         "hs4": "3104", "label": "Potash",            "color": [222, 132, 178]},
 ]
 HS4_TO_ID = {c["hs4"]: c["id"] for c in COMMODITIES}
 TARGET_HS4 = set(HS4_TO_ID)
