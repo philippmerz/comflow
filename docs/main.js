@@ -179,9 +179,18 @@ const widthFor = (d) => MIN_WIDTH_PX + norm(d) * (MAX_WIDTH_PX - MIN_WIDTH_PX);
 // flows must fall away steeply (power curve, low floor) so the basemap shows
 // through and only significant routes read; large flows stay bright + thick.
 const baseAlpha = (d) => Math.round(4 + Math.pow(norm(d), 1.7) * 208);  // ~4..212
-// pulses are a subtle travelling accent — much fainter than the line they ride
-const glowAlpha = (d) => Math.round(8 + Math.pow(norm(d), 1.5) * 66);   // ~8..74
+// pulses are a travelling highlight — a hot, whitened glow so they read as
+// moving light on top of the (often bright) coloured line; brightness scales
+// with volume so thick routes get clearly visible pulses.
+const glowAlpha = (d) => Math.round(26 + Math.pow(norm(d), 1.05) * 175); // ~26..201
 const glowSize = (d) => GLOW_MIN + norm(d) * (GLOW_MAX - GLOW_MIN);
+// lighten the commodity colour toward white so the pulse contrasts against the
+// same-coloured line beneath it (a same-hue pulse on a bright line is invisible)
+const glowTint = (c) => [
+  Math.round(c[0] + (255 - c[0]) * 0.55),
+  Math.round(c[1] + (255 - c[1]) * 0.55),
+  Math.round(c[2] + (255 - c[2]) * 0.55),
+];
 
 /* ---------- flow set ---------- */
 
@@ -213,7 +222,7 @@ function buildPulses() {
   const dots = [];
   const t = state.time;
   for (const d of state.flows) {
-    const sz = glowSize(d), a = glowAlpha(d), col = d.color;
+    const sz = glowSize(d), a = glowAlpha(d), tint = glowTint(d.color);
     for (let j = 0; j < PULSES; j++) {
       let f = (t * SPEED + d.phase + j / PULSES) % 1;
       // fade near both ends so the wrap (dest -> source) is invisible
@@ -223,7 +232,7 @@ function buildPulses() {
       if (fade <= 0.02) continue;
       dots.push({
         position: pointAt(d.path, f),
-        color: [col[0], col[1], col[2], Math.round(a * fade)],
+        color: [tint[0], tint[1], tint[2], Math.round(a * fade)],
         size: sz,
       });
     }
@@ -273,7 +282,7 @@ function draw() {
     parameters: { depthTest: false, blend: true, blendFunc: [770, 1] }, // additive glow
   });
 
-  const layers = STILL ? [base, net] : [base, net, pulses];
+  const layers = [base, net, pulses];  // STILL = one static frame (no rAF loop)
 
   if (state.hover) {
     layers.push(new PathLayer({
