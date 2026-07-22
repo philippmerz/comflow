@@ -50,11 +50,11 @@ const fmtT = (n) => {
 };
 
 const INITIAL_VIEW = { longitude: 13, latitude: 26, zoom: 0.6, pitch: 0, bearing: 0 };
-const MAX_WIDTH_PX = 6;    // widest static line
-const MIN_WIDTH_PX = 0.3;
-const PULSES = 6;          // glows in flight per line — enough to blend into a ribbon
+const MAX_WIDTH_PX = 7.5;  // widest static line
+const MIN_WIDTH_PX = 0.35;
+const PULSES = 5;          // glows in flight per line — a travelling accent
 const SPEED = 0.12;        // traversals per second (1 / seconds-per-trip)
-const GLOW_MIN = 7, GLOW_MAX = 26;   // glow sprite size range (px) — soft & diffuse
+const GLOW_MIN = 5, GLOW_MAX = 16;   // glow sprite size range (px) — small & soft
 const FADE = 0.12;         // fraction of the path over which pulses fade in/out
 
 let deckgl;
@@ -171,8 +171,11 @@ function pointAt(path, f) {
 
 const norm = (d) => Math.sqrt(d[state.measure]) / Math.sqrt(state.maxByMeasure[state.measure]);
 const widthFor = (d) => MIN_WIDTH_PX + norm(d) * (MAX_WIDTH_PX - MIN_WIDTH_PX);
-const baseAlpha = (d) => Math.round(10 + norm(d) * 46);   // faint static line 10..56
-const glowAlpha = (d) => Math.round(14 + norm(d) * 74);   // faint soft glow 14..88
+// lines are the data layer — strong volume ramp so width AND brightness both
+// encode volume; small flows recede, large flows read clearly.
+const baseAlpha = (d) => Math.round(38 + norm(d) * 178);  // 38..216
+// pulses are a subtle travelling accent — much fainter than the line they ride
+const glowAlpha = (d) => Math.round(12 + norm(d) * 58);   // 12..70
 const glowSize = (d) => GLOW_MIN + norm(d) * (GLOW_MAX - GLOW_MIN);
 
 /* ---------- flow set ---------- */
@@ -243,7 +246,7 @@ function draw() {
     data: flows,
     getPath: (d) => d.path,
     getColor: (d) => [...d.color, baseAlpha(d)],
-    getWidth: (d) => Math.max(0.5, widthFor(d) * 0.5),
+    getWidth: (d) => widthFor(d),
     widthUnits: "pixels", widthMinPixels: 0.5,
     capRounded: true, jointRounded: true,
     parameters: { depthTest: false },
