@@ -62,6 +62,16 @@ COUNTRY_OVERRIDES = {
 NAME_FIXES = {"TWN": "Taiwan"}
 
 
+def _fix_mojibake(s):
+    """BACI's country_codes stores some names double-encoded as UTF-8 mojibake
+    (e.g. "TÃ¼rkiye" for "Türkiye" — bytes C3 83 C2 BC). Recover the intended
+    text with a latin-1 round-trip; leave already-correct strings unchanged."""
+    try:
+        return s.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return s
+
+
 def load_country_codes(z):
     """numeric code (str) -> (iso3, name)."""
     out = {}
@@ -70,7 +80,7 @@ def load_country_codes(z):
     for row in rd:
         code = (row.get("country_code") or "").strip()
         iso3 = (row.get("country_iso3") or "").strip().upper()
-        name = (row.get("country_name") or "").strip()
+        name = _fix_mojibake((row.get("country_name") or "").strip())
         if code and iso3 and iso3 != "NULL" and len(iso3) == 3 and iso3.isalpha():
             out[code] = (iso3, name)
     for code, pair in COUNTRY_OVERRIDES.items():
