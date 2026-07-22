@@ -56,6 +56,7 @@ const PULSES = 5;          // glows in flight per line — a travelling accent
 const SPEED = 0.12;        // traversals per second (1 / seconds-per-trip)
 const GLOW_MIN = 5, GLOW_MAX = 16;   // glow sprite size range (px) — small & soft
 const FADE = 0.12;         // fraction of the path over which pulses fade in/out
+const STILL = new URLSearchParams(location.search).has("still"); // static-frame mode
 
 let deckgl;
 
@@ -91,7 +92,10 @@ async function init() {
     `BACI (CEPII) · reconciled UN Comtrade · top ${data.meta.top_n}/commodity`;
 
   rebuildFlows();
-  requestAnimationFrame(tick);
+  // ?still renders one static frame (lines + basemap, no animated pulses) — a
+  // lightweight path for headless capture / perf checks.
+  if (STILL) draw();
+  else requestAnimationFrame(tick);
 }
 
 function computeMaxima() {
@@ -171,11 +175,12 @@ function pointAt(path, f) {
 
 const norm = (d) => Math.sqrt(d[state.measure]) / Math.sqrt(state.maxByMeasure[state.measure]);
 const widthFor = (d) => MIN_WIDTH_PX + norm(d) * (MAX_WIDTH_PX - MIN_WIDTH_PX);
-// lines are the data layer — strong volume ramp so width AND brightness both
-// encode volume; small flows recede, large flows read clearly.
-const baseAlpha = (d) => Math.round(38 + norm(d) * 178);  // 38..216
+// lines are the data layer. With ~200 flows/commodity the long tail of small
+// flows must fall away steeply (power curve, low floor) so the basemap shows
+// through and only significant routes read; large flows stay bright + thick.
+const baseAlpha = (d) => Math.round(4 + Math.pow(norm(d), 1.7) * 208);  // ~4..212
 // pulses are a subtle travelling accent — much fainter than the line they ride
-const glowAlpha = (d) => Math.round(12 + norm(d) * 58);   // 12..70
+const glowAlpha = (d) => Math.round(8 + Math.pow(norm(d), 1.5) * 66);   // ~8..74
 const glowSize = (d) => GLOW_MIN + norm(d) * (GLOW_MAX - GLOW_MIN);
 
 /* ---------- flow set ---------- */
@@ -235,9 +240,9 @@ function draw() {
     id: "countries",
     data: state.world,
     stroked: true, filled: true,
-    getFillColor: [16, 18, 23, 255],
-    getLineColor: [40, 44, 52, 255],
-    lineWidthMinPixels: 0.5,
+    getFillColor: [22, 25, 31, 255],
+    getLineColor: [58, 64, 76, 255],
+    lineWidthMinPixels: 0.6,
     parameters: { depthTest: false },
   });
 
@@ -268,7 +273,7 @@ function draw() {
     parameters: { depthTest: false, blend: true, blendFunc: [770, 1] }, // additive glow
   });
 
-  const layers = [base, net, pulses];
+  const layers = STILL ? [base, net] : [base, net, pulses];
 
   if (state.hover) {
     layers.push(new PathLayer({
