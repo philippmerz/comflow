@@ -29,7 +29,8 @@ const fmtT = (n) => {
   return n + " t";
 };
 
-const INITIAL_VIEW = { longitude: 12, latitude: 28, zoom: 1.25, pitch: 32, bearing: 0 };
+const INITIAL_VIEW = { longitude: 13, latitude: 26, zoom: 0.6, pitch: 0, bearing: 0 };
+const ARC_HEIGHT = 0.22;  // lower = flatter arcs that stay within frame
 const MAX_WIDTH_PX = 13;   // widest arc
 const MIN_WIDTH_PX = 0.7;  // thinnest visible arc
 
@@ -64,8 +65,7 @@ async function init() {
   });
 
   el("src").innerHTML =
-    data.meta.source.replace(/BACI \(CEPII\)[^—]*/, "BACI (CEPII)") +
-    ` · top ${data.meta.top_n}/commodity`;
+    `BACI (CEPII) · reconciled UN Comtrade · top ${data.meta.top_n}/commodity`;
 
   render();
 }
@@ -122,6 +122,15 @@ function widthFor(d) {
   return MIN_WIDTH_PX + norm * (MAX_WIDTH_PX - MIN_WIDTH_PX);
 }
 
+// deck.gl arc peak height scales with span, so long routes bow far higher than
+// short ones. Scale height inversely with span so every arc bows to a similar,
+// gentle height — a tidy uniform arc field instead of tall vertical streaks.
+function heightFor(d) {
+  const dx = d.es[0] - d.is[0], dy = d.es[1] - d.is[1];
+  const span = Math.hypot(dx, dy) || 1;          // rough great-circle span (deg)
+  return Math.max(0.08, Math.min(0.6, (ARC_HEIGHT * 55) / span));
+}
+
 function render() {
   const flows = currentFlows();
 
@@ -137,7 +146,6 @@ function render() {
   });
 
   const hoverKey = state.hover;
-  const dimAlpha = hoverKey ? 40 : 255;
 
   // glow halo (wide, low alpha) beneath the crisp arc → neon on black
   const halo = new ArcLayer({
@@ -150,7 +158,7 @@ function render() {
     getTargetColor: (d) => rgba(d.color, hoverKey && d.key !== hoverKey ? 10 : 34),
     getWidth: (d) => widthFor(d) * 3.2,
     widthUnits: "pixels",
-    getHeight: 0.45,
+    getHeight: heightFor,
     parameters: { depthTest: false, blend: true, blendFunc: [770, 1] }, // additive
     pickable: false,
     updateTriggers: { getSourceColor: [hoverKey], getTargetColor: [hoverKey], getWidth: [state.measure] },
@@ -168,7 +176,7 @@ function render() {
     getWidth: widthFor,
     widthUnits: "pixels",
     widthMinPixels: MIN_WIDTH_PX,
-    getHeight: 0.45,
+    getHeight: heightFor,
     pickable: true,
     autoHighlight: false,
     parameters: { depthTest: false },
