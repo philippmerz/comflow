@@ -1,0 +1,11 @@
+# raw source data — large, re-downloadable; not committed
+data/raw/
+*.zip
+
+# python
+__pycache__/
+*.pyc
+
+# scratch
+/tmp/
+*.log

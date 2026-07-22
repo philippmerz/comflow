@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>comflow · global hard-commodity trade flows</title>
+<meta name="description" content="Interactive map of bilateral trade flows for the world's largest hard commodities — iron ore, coal, copper, bauxite, aluminium." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="style.css" />
+<script src="https://unpkg.com/deck.gl@9.0.33/dist.min.js"></script>
+</head>
+<body>
+  <div id="map"></div>
+
+  <header id="topbar">
+    <div class="brand">
+      <span class="mark"></span>
+      <div class="brandtext">
+        <h1>comflow</h1>
+        <p>global hard-commodity trade flows</p>
+      </div>
+    </div>
+    <div id="period" class="period" aria-live="polite"></div>
+  </header>
+
+  <section id="panel" class="panel" aria-label="controls">
+    <div class="panel-block">
+      <div class="panel-label">Commodities</div>
+      <div id="chips" class="chips"></div>
+    </div>
+    <div class="panel-block">
+      <div class="panel-label">Measure</div>
+      <div id="measure" class="seg" role="radiogroup" aria-label="measure">
+        <button data-measure="v" class="on" role="radio" aria-checked="true">Value</button>
+        <button data-measure="w" role="radio" aria-checked="false">Weight</button>
+      </div>
+    </div>
+    <div class="panel-block" id="time-block">
+      <div class="panel-label"><span>Period</span><span id="time-value" class="time-value"></span></div>
+      <input id="time" class="slider" type="range" min="0" max="0" value="0" step="1" />
+    </div>
+    <div class="panel-foot">
+      <span id="stat" class="stat"></span>
+    </div>
+  </section>
+
+  <div id="tooltip" class="tooltip" hidden></div>
+
+  <footer id="legend" class="legend">
+    <span class="src" id="src">loading…</span>
+  </footer>
+
+  <script src="main.js" type="module"></script>
+</body>
+</html>
