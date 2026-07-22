@@ -1,19 +1,23 @@
 // comflow — global hard-commodity trade flows.
-// deck.gl standalone (no basemap tiles): country landmasses drawn as dark
-// polygons on true black, bilateral flows as glowing arcs coloured by
-// commodity, width scaled by the selected measure.
+// deck.gl standalone (no basemap tiles): dark country landmasses on true black,
+// bilateral flows as great-circle paths — a faint static base network plus an
+// animated pulse of light traversing each line from exporter to importer.
+// Colour encodes commodity; width and opacity scale with trade volume.
 
-const { Deck, MapView, GeoJsonLayer, ArcLayer } = deck;
+const { Deck, MapView, GeoJsonLayer, PathLayer, TripsLayer } = deck;
 
 const DATA = "data/";
 const state = {
   data: null,
   countries: null,
-  active: new Set(),      // commodity ids currently shown
+  world: null,
+  active: new Set(),
   periodIdx: 0,
   measure: "v",           // 'v' value (USD) | 'w' weight (tonnes)
-  hover: null,            // hovered flow key
-  maxByMeasure: { v: 1, w: 1 }, // global max for stable width scaling across periods
+  hover: null,            // hovered flow object
+  maxByMeasure: { v: 1, w: 1 },
+  flows: [],              // current flow set (with cached great-circle paths)
+  time: 0,                // animation clock
 };
 
 const el = (id) => document.getElementById(id);
@@ -30,9 +34,11 @@ const fmtT = (n) => {
 };
 
 const INITIAL_VIEW = { longitude: 13, latitude: 26, zoom: 0.6, pitch: 0, bearing: 0 };
-const ARC_HEIGHT = 0.22;  // lower = flatter arcs that stay within frame
-const MAX_WIDTH_PX = 13;   // widest arc
-const MIN_WIDTH_PX = 0.7;  // thinnest visible arc
+const MAX_WIDTH_PX = 9;    // widest flow
+const MIN_WIDTH_PX = 0.25; // thinnest flow — small volumes stay recessive
+const LOOP = 2.0;          // animation period (phase spread 0..1 over a 0..2 clock)
+const TRAIL = 0.16;        // comet trail length in clock units
+const SPEED = 0.28;        // clock units per second
 
 let deckgl;
 
@@ -48,7 +54,7 @@ async function init() {
   state.countries = countries;
   state.world = world;
   data.meta.commodities.forEach((c) => state.active.add(c.id));
-  state.periodIdx = data.meta.years.length - 1; // start on the latest period
+  state.periodIdx = data.meta.years.length - 1;
 
   computeMaxima();
   buildChips();
@@ -59,7 +65,7 @@ async function init() {
     parent: el("map"),
     views: new MapView({ repeat: true }),
     initialViewState: INITIAL_VIEW,
-    controller: { dragRotate: true, minZoom: 0.6, maxZoom: 7, inertia: 220 },
+    controller: { dragRotate: true, minZoom: 0.5, maxZoom: 7, inertia: 220 },
     getCursor: ({ isHovering }) => (isHovering ? "pointer" : "grab"),
     layers: [],
   });
@@ -67,11 +73,10 @@ async function init() {
   el("src").innerHTML =
     `BACI (CEPII) · reconciled UN Comtrade · top ${data.meta.top_n}/commodity`;
 
-  render();
+  rebuildFlows();
+  requestAnimationFrame(tick);
 }
 
-// widest flow per measure across ALL commodities & periods, so arc widths stay
-// comparable when you scrub time or toggle commodities.
 function computeMaxima() {
   let mv = 1, mw = 1;
   const f = state.data.flows;
@@ -84,138 +89,196 @@ function computeMaxima() {
   state.maxByMeasure = { v: mv, w: mw };
 }
 
-function currentPeriod() {
-  return String(state.data.meta.years[state.periodIdx]);
+const currentPeriod = () => String(state.data.meta.years[state.periodIdx]);
+
+/* ---------- great-circle geometry (cached per flow) ---------- */
+
+const D2R = Math.PI / 180, R2D = 180 / Math.PI;
+const pathCache = new Map();
+
+// Hashless deterministic phase from the flow key so pulses are staggered but
+// stable across re-renders (no Math.random flicker when toggling).
+function phaseOf(key) {
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  return (h % 1000) / 1000;
 }
 
-function commodityById(id) {
-  return state.data.meta.commodities.find((c) => c.id === id);
-}
-
-// flatten active commodities for the current period into arc records
-function currentFlows() {
-  const yr = currentPeriod();
-  const out = [];
-  for (const c of state.data.meta.commodities) {
-    if (!state.active.has(c.id)) continue;
-    const rows = (state.data.flows[c.id] && state.data.flows[c.id][yr]) || [];
-    for (const d of rows) {
-      out.push({
-        key: c.id + "|" + d.e + "|" + d.i,
-        cid: c.id,
-        color: c.color,
-        label: c.label,
-        e: d.e, i: d.i,
-        es: d.es, is: d.is,
-        v: d.v, w: d.w,
-      });
+function greatCircle(a, b) {
+  const [lo1, la1] = a.map((v) => v * D2R);
+  const [lo2, la2] = b.map((v) => v * D2R);
+  const dLat = la2 - la1, dLon = lo2 - lo1;
+  const h = Math.sin(dLat / 2) ** 2 +
+    Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) ** 2;
+  const d = 2 * Math.asin(Math.min(1, Math.sqrt(h))); // angular distance (rad)
+  const degDist = d * R2D;
+  const n = Math.max(12, Math.min(48, Math.round(degDist / 4)));
+  const pts = [];
+  if (d < 1e-6) return { path: [a, b], ts: [0, 1] };
+  const sinD = Math.sin(d);
+  let prevLon = null;
+  for (let i = 0; i <= n; i++) {
+    const f = i / n;
+    const A = Math.sin((1 - f) * d) / sinD;
+    const B = Math.sin(f * d) / sinD;
+    const x = A * Math.cos(la1) * Math.cos(lo1) + B * Math.cos(la2) * Math.cos(lo2);
+    const y = A * Math.cos(la1) * Math.sin(lo1) + B * Math.cos(la2) * Math.sin(lo2);
+    const z = A * Math.sin(la1) + B * Math.sin(la2);
+    const lat = Math.atan2(z, Math.hypot(x, y)) * R2D;
+    let lon = Math.atan2(y, x) * R2D;
+    if (prevLon !== null) {            // unwrap across the antimeridian
+      while (lon - prevLon > 180) lon -= 360;
+      while (lon - prevLon < -180) lon += 360;
     }
+    prevLon = lon;
+    pts.push([lon, lat]);
   }
-  // draw largest last (on top)
-  out.sort((a, b) => a[state.measure] - b[state.measure]);
-  return out;
+  // timestamps: even fraction 0..1 (constant-parameter pulse speed)
+  const ts = pts.map((_, i) => i / n);
+  return { path: pts, ts };
 }
+
+function geomFor(d) {
+  let g = pathCache.get(d.key);
+  if (!g) {
+    const gc = greatCircle(d.es, d.is);
+    const ph = phaseOf(d.key);
+    g = { path: gc.path, ts: gc.ts.map((t) => t + ph) }; // phase-shifted for stagger
+    pathCache.set(d.key, g);
+  }
+  return g;
+}
+
+/* ---------- scales ---------- */
 
 function widthFor(d) {
   const m = state.measure;
   const norm = Math.sqrt(d[m]) / Math.sqrt(state.maxByMeasure[m]);
   return MIN_WIDTH_PX + norm * (MAX_WIDTH_PX - MIN_WIDTH_PX);
 }
-
-// deck.gl arc peak height scales with span, so long routes bow far higher than
-// short ones. Scale height inversely with span so every arc bows to a similar,
-// gentle height — a tidy uniform arc field instead of tall vertical streaks.
-function heightFor(d) {
-  const dx = d.es[0] - d.is[0], dy = d.es[1] - d.is[1];
-  const span = Math.hypot(dx, dy) || 1;          // rough great-circle span (deg)
-  return Math.max(0.08, Math.min(0.6, (ARC_HEIGHT * 55) / span));
+// opacity scales with volume: small flows recede, large flows read.
+function baseAlpha(d) {
+  const norm = Math.sqrt(d[state.measure]) / Math.sqrt(state.maxByMeasure[state.measure]);
+  return Math.round(10 + norm * 60);   // 10..70 — faint static network
+}
+function trailAlpha(d) {
+  const norm = Math.sqrt(d[state.measure]) / Math.sqrt(state.maxByMeasure[state.measure]);
+  return Math.round(45 + norm * 180);  // 45..225 — the travelling light
 }
 
-function render() {
-  const flows = currentFlows();
+/* ---------- flow set ---------- */
+
+function rebuildFlows() {
+  const yr = currentPeriod();
+  const out = [];
+  for (const c of state.data.meta.commodities) {
+    if (!state.active.has(c.id)) continue;
+    const rows = (state.data.flows[c.id] && state.data.flows[c.id][yr]) || [];
+    for (const d of rows) {
+      const rec = {
+        key: c.id + "|" + d.e + "|" + d.i,
+        cid: c.id, color: c.color, label: c.label,
+        e: d.e, i: d.i, es: d.es, is: d.is, v: d.v, w: d.w,
+      };
+      const g = geomFor(rec);
+      rec.path = g.path; rec.ts = g.ts;
+      out.push(rec);
+    }
+  }
+  out.sort((a, b) => a[state.measure] - b[state.measure]); // big flows drawn last
+  state.flows = out;
+  updateStat(out);
+}
+
+/* ---------- render (called every animation frame) ---------- */
+
+function draw() {
+  const flows = state.flows;
 
   const base = new GeoJsonLayer({
     id: "countries",
     data: state.world,
-    stroked: true,
-    filled: true,
-    getFillColor: [17, 19, 24, 255],
-    getLineColor: [42, 46, 54, 255],
+    stroked: true, filled: true,
+    getFillColor: [16, 18, 23, 255],
+    getLineColor: [40, 44, 52, 255],
     lineWidthMinPixels: 0.5,
     parameters: { depthTest: false },
   });
 
-  const hoverKey = state.hover;
-
-  // glow halo (wide, low alpha) beneath the crisp arc → neon on black
-  const halo = new ArcLayer({
-    id: "arcs-halo",
+  // faint static network — always visible so structure persists between pulses
+  const net = new PathLayer({
+    id: "net",
     data: flows,
-    greatCircle: true,
-    getSourcePosition: (d) => d.es,
-    getTargetPosition: (d) => d.is,
-    getSourceColor: (d) => rgba(d.color, hoverKey && d.key !== hoverKey ? 8 : 26),
-    getTargetColor: (d) => rgba(d.color, hoverKey && d.key !== hoverKey ? 10 : 34),
-    getWidth: (d) => widthFor(d) * 3.2,
+    getPath: (d) => d.path,
+    getColor: (d) => [...d.color, baseAlpha(d)],
+    getWidth: (d) => Math.max(0.5, widthFor(d) * 0.6),
     widthUnits: "pixels",
-    getHeight: heightFor,
-    parameters: { depthTest: false, blend: true, blendFunc: [770, 1] }, // additive
-    pickable: false,
-    updateTriggers: { getSourceColor: [hoverKey], getTargetColor: [hoverKey], getWidth: [state.measure] },
+    widthMinPixels: 0.5,
+    capRounded: true, jointRounded: true,
+    parameters: { depthTest: false },
+    updateTriggers: { getColor: [state.measure], getWidth: [state.measure] },
+    pickable: true,
+    onHover: onHover,
   });
 
-  const arcs = new ArcLayer({
-    id: "arcs",
+  // animated pulse of light travelling exporter → importer
+  const trips = new TripsLayer({
+    id: "trips",
     data: flows,
-    greatCircle: true,
-    getSourcePosition: (d) => d.es,
-    getTargetPosition: (d) => d.is,
-    // exporter end dimmer, importer end bright → reads as direction of flow
-    getSourceColor: (d) => rgba(d.color, alphaFor(d, hoverKey, 70)),
-    getTargetColor: (d) => rgba(d.color, alphaFor(d, hoverKey, 235)),
+    getPath: (d) => d.path,
+    getTimestamps: (d) => d.ts,
+    getColor: (d) => [...d.color, trailAlpha(d)],
     getWidth: widthFor,
     widthUnits: "pixels",
     widthMinPixels: MIN_WIDTH_PX,
-    getHeight: heightFor,
-    pickable: true,
-    autoHighlight: false,
-    parameters: { depthTest: false },
-    onHover: onHover,
-    updateTriggers: {
-      getSourceColor: [hoverKey],
-      getTargetColor: [hoverKey],
-      getWidth: [state.measure],
-    },
+    capRounded: true, jointRounded: true,
+    fadeTrail: true,
+    trailLength: TRAIL,
+    currentTime: state.time,
+    parameters: { depthTest: false, blend: true, blendFunc: [770, 1] }, // additive glow
+    updateTriggers: { getColor: [state.measure], getWidth: [state.measure] },
   });
 
-  deckgl.setProps({ layers: [base, halo, arcs] });
-  updateStat(flows);
+  const layers = [base, net, trips];
+
+  // hovered flow: a bright overlay so the picked route pops without dimming all
+  if (state.hover) {
+    layers.push(new PathLayer({
+      id: "hi",
+      data: [state.hover],
+      getPath: (d) => d.path,
+      getColor: (d) => [...d.color, 255],
+      getWidth: (d) => widthFor(d) + 1.4,
+      widthUnits: "pixels", widthMinPixels: 1.5,
+      capRounded: true, jointRounded: true,
+      parameters: { depthTest: false },
+    }));
+  }
+
+  deckgl.setProps({ layers });
 }
 
-function alphaFor(d, hoverKey, full) {
-  if (!hoverKey) return full;
-  return d.key === hoverKey ? Math.min(255, full + 20) : Math.round(full * 0.16);
+let lastT = null;
+function tick(now) {
+  if (lastT === null) lastT = now;
+  const dt = Math.min(0.05, (now - lastT) / 1000); // clamp big gaps (tab switches)
+  lastT = now;
+  state.time = (state.time + dt * SPEED) % LOOP;
+  draw();
+  requestAnimationFrame(tick);
 }
 
-function rgba(c, a) {
-  return [c[0], c[1], c[2], a];
-}
+/* ---------- interaction ---------- */
 
 function onHover(info) {
   const tip = el("tooltip");
-  if (!info.object) {
-    if (state.hover !== null) {
-      state.hover = null;
-      render();
-    }
+  const d = info && info.object;
+  if (!d) {
+    if (state.hover) state.hover = null;
     tip.hidden = true;
     return;
   }
-  const d = info.object;
-  if (state.hover !== d.key) {
-    state.hover = d.key;
-    render();
-  }
+  state.hover = d;
   const en = nameOf(d.e), inn = nameOf(d.i);
   tip.innerHTML =
     `<div class="tt-route">${en} <span class="arrow">→</span> ${inn}</div>` +
@@ -229,9 +292,7 @@ function onHover(info) {
   tip.hidden = false;
 }
 
-function nameOf(iso) {
-  return (state.countries[iso] && state.countries[iso].name) || iso;
-}
+const nameOf = (iso) => (state.countries[iso] && state.countries[iso].name) || iso;
 
 function updateStat(flows) {
   let v = 0, w = 0;
@@ -252,33 +313,27 @@ function buildChips() {
     chip.dataset.id = c.id;
     chip.innerHTML =
       `<span class="dot" style="color:rgb(${c.color.join(",")})"></span>${c.label}`;
-    chip.onclick = () => toggleCommodity(c.id, chip);
+    chip.onclick = () => {
+      if (state.active.has(c.id)) {
+        state.active.delete(c.id); chip.classList.remove("on"); chip.classList.add("off");
+      } else {
+        state.active.add(c.id); chip.classList.add("on"); chip.classList.remove("off");
+      }
+      rebuildFlows();
+    };
     box.appendChild(chip);
   }
-}
-
-function toggleCommodity(id, chip) {
-  if (state.active.has(id)) {
-    state.active.delete(id);
-    chip.classList.remove("on"); chip.classList.add("off");
-  } else {
-    state.active.add(id);
-    chip.classList.add("on"); chip.classList.remove("off");
-  }
-  render();
 }
 
 function buildTimeline() {
   const years = state.data.meta.years;
   const slider = el("time");
-  slider.min = 0;
-  slider.max = years.length - 1;
-  slider.value = state.periodIdx;
+  slider.min = 0; slider.max = years.length - 1; slider.value = state.periodIdx;
   el("time-value").textContent = years[state.periodIdx];
   slider.oninput = () => {
     state.periodIdx = +slider.value;
     el("time-value").textContent = years[state.periodIdx];
-    render();
+    rebuildFlows();
   };
   if (years.length < 2) el("time-block").style.opacity = 0.4;
 }
@@ -293,7 +348,7 @@ function wireMeasure() {
         x.classList.toggle("on", on);
         x.setAttribute("aria-checked", on ? "true" : "false");
       });
-      render();
+      rebuildFlows();
     };
   });
 }
