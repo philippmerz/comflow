@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://philippmerz.github.io/comflow/sitemap.xml

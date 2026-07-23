@@ -2,11 +2,66 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-<title>comflow · global hard-commodity trade flows</title>
-<meta name="description" content="Interactive map of bilateral trade flows for the world's largest hard commodities — iron ore, coal, copper, bauxite, aluminium." />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>comflow — Global Hard-Commodity Trade Flow Map (oil, iron ore, copper, gold)</title>
+<meta name="description" content="Interactive map of global trade flows for the largest hard commodities — crude oil, iron ore, coal, copper, gold, aluminium — from UN Comtrade data." />
+<meta name="keywords" content="commodity trade flows, trade flow map, iron ore trade, crude oil trade, copper trade map, gold trade, global commodities, UN Comtrade visualization, BACI, bilateral trade data, interactive trade map, commodity exports imports" />
+<meta name="author" content="Philipp Merz" />
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+<meta name="theme-color" content="#000000" />
+<link rel="canonical" href="https://philippmerz.github.io/comflow/" />
 <link rel="icon" type="image/png" href="favicon.png" />
 <link rel="apple-touch-icon" href="favicon.png" />
+
+<!-- Open Graph / Facebook / LinkedIn -->
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="comflow" />
+<meta property="og:url" content="https://philippmerz.github.io/comflow/" />
+<meta property="og:title" content="comflow — Global Hard-Commodity Trade Flow Map" />
+<meta property="og:description" content="An interactive world map of global trade flows for the largest hard commodities — crude oil, iron ore, coal, copper, gold, aluminium, nickel, zinc and more. Animated great-circle routes coloured by commodity and sized by trade value, from reconciled UN Comtrade (BACI) data." />
+<meta property="og:image" content="https://philippmerz.github.io/comflow/og-preview.jpg" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="Glowing great-circle trade-flow arcs over a dark world map" />
+
+<!-- Twitter -->
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="comflow — Global Hard-Commodity Trade Flow Map" />
+<meta name="twitter:description" content="Interactive map of global trade flows for crude oil, iron ore, coal, copper, gold, aluminium and more — from UN Comtrade data." />
+<meta name="twitter:image" content="https://philippmerz.github.io/comflow/og-preview.jpg" />
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  "name": "comflow",
+  "url": "https://philippmerz.github.io/comflow/",
+  "description": "An interactive world map of global bilateral trade flows for the largest hard commodities, built from reconciled UN Comtrade (BACI) data.",
+  "applicationCategory": "BusinessApplication",
+  "operatingSystem": "Any (modern web browser with WebGL)",
+  "browserRequirements": "Requires JavaScript and WebGL",
+  "isAccessibleForFree": true,
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "author": { "@type": "Person", "name": "Philipp Merz" }
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Dataset",
+  "name": "Global hard-commodity bilateral trade flows (2022–2024)",
+  "description": "Top bilateral trade flows for 16 hard commodities — crude oil, refined petroleum, petroleum gas, gold, iron ore, coal, copper ore, refined copper, bauxite, unwrought aluminium, ferro-alloys, nickel, zinc, lead, tin and potash — by trade value (USD) and weight (tonnes), for 2022–2024.",
+  "keywords": ["commodity trade", "iron ore", "crude oil", "copper", "gold", "coal", "bilateral trade", "international trade", "UN Comtrade", "BACI"],
+  "url": "https://philippmerz.github.io/comflow/",
+  "temporalCoverage": "2022/2024",
+  "spatialCoverage": { "@type": "Place", "name": "Worldwide" },
+  "variableMeasured": ["Trade value (USD)", "Trade weight (tonnes)"],
+  "isBasedOn": "https://www.cepii.fr/CEPII/en/bdd_modele/bdd_modele_item.asp?id=37",
+  "creator": { "@type": "Person", "name": "Philipp Merz" },
+  "license": "https://opensource.org/licenses/MIT"
+}
+</script>
+
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -16,11 +71,47 @@
 <body>
   <div id="map"></div>
 
+  <!-- Accessible / crawlable text alternative to the WebGL map -->
+  <section class="visually-hidden">
+    <h2>What comflow shows</h2>
+    <p>
+      comflow is an interactive world map of global bilateral trade flows for the
+      largest hard commodities. Each animated great-circle route connects an
+      exporting country to an importing country; its colour identifies the
+      commodity and its width and brightness scale with the trade's value or
+      weight for the selected year.
+    </p>
+    <p>
+      Sixteen commodities are covered: crude oil, refined petroleum, petroleum
+      gas (LNG), gold, iron ore, coal, copper ore, refined copper, bauxite,
+      unwrought aluminium, ferro-alloys, nickel, zinc, lead, tin and potash. You
+      can toggle any commodity, switch between trade value (US dollars) and
+      weight (tonnes), and step through the years 2022 to 2024.
+    </p>
+    <p>
+      The underlying data is BACI, the CEPII international-trade database that
+      reconciles United Nations Comtrade records into consistent bilateral flows.
+      Figures are gross trade, so goods that transit a hub (such as crude oil
+      re-exported through Rotterdam) are recorded by shipment country rather than
+      country of production.
+    </p>
+  </section>
+
+  <noscript>
+    <div style="max-width:640px;margin:12vh auto;padding:0 24px;color:#f2f3f5;font-family:system-ui,sans-serif;line-height:1.6">
+      <h1>comflow — global hard-commodity trade flow map</h1>
+      <p>This interactive map needs JavaScript and WebGL to render. It visualizes
+      global bilateral trade flows for sixteen hard commodities — crude oil, iron
+      ore, coal, copper, gold, aluminium, nickel, zinc and more — using reconciled
+      UN Comtrade (BACI) data for 2022–2024.</p>
+    </div>
+  </noscript>
+
   <header id="topbar">
     <div class="brand">
       <span class="mark"></span>
       <div class="brandtext">
-        <h1>comflow</h1>
+        <h1>comflow<span class="visually-hidden"> — global hard-commodity trade flow map</span></h1>
         <p>global hard-commodity trade flows</p>
       </div>
     </div>
