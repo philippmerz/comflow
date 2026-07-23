@@ -31,7 +31,7 @@ const state = {
   periodIdx: 0,
   measure: "v",
   hover: null,
-  maxByMeasure: { v: 1, w: 1 },
+  viewMax: { v: 1, w: 1 }, // max flow among the CURRENTLY shown set → renormalized
   flows: [],
   time: 0,
 };
@@ -53,7 +53,7 @@ const fmtT = (n) => {
 
 const INITIAL_VIEW = { longitude: 13, latitude: 26, zoom: 0.6, pitch: 0, bearing: 0 };
 const MAX_WIDTH_PX = 7.5;  // widest static line
-const MIN_WIDTH_PX = 0.35;
+const MIN_WIDTH_PX = 0.6;
 const PULSES = 5;          // glows in flight per line — a travelling accent
 const SPEED = 0.12;        // traversals per second (1 / seconds-per-trip)
 const GLOW_MIN = 5, GLOW_MAX = 16;   // glow sprite size range (px) — small & soft
@@ -76,10 +76,10 @@ async function init() {
   data.meta.commodities.forEach((c) => state.active.add(c.id));
   state.periodIdx = data.meta.years.length - 1;
 
-  computeMaxima();
   buildChips();
   buildTimeline();
   wireMeasure();
+  wireStatTooltip();
 
   deckgl = new Deck({
     parent: el("map"),
@@ -100,17 +100,6 @@ async function init() {
   else requestAnimationFrame(tick);
 }
 
-function computeMaxima() {
-  let mv = 1, mw = 1;
-  const f = state.data.flows;
-  for (const cid in f)
-    for (const yr in f[cid])
-      for (const d of f[cid][yr]) {
-        if (d.v > mv) mv = d.v;
-        if (d.w > mw) mw = d.w;
-      }
-  state.maxByMeasure = { v: mv, w: mw };
-}
 
 const currentPeriod = () => String(state.data.meta.years[state.periodIdx]);
 
@@ -175,7 +164,7 @@ function pointAt(path, f) {
 
 /* ---------- scales ---------- */
 
-const norm = (d) => Math.sqrt(d[state.measure]) / Math.sqrt(state.maxByMeasure[state.measure]);
+const norm = (d) => Math.sqrt(d[state.measure]) / Math.sqrt(state.viewMax[state.measure]);
 const widthFor = (d) => MIN_WIDTH_PX + norm(d) * (MAX_WIDTH_PX - MIN_WIDTH_PX);
 // lines are the data layer. With ~200 flows/commodity the long tail of small
 // flows must fall away steeply (power curve, low floor) so the basemap shows
@@ -215,7 +204,14 @@ function rebuildFlows() {
   }
   out.sort((a, b) => a[state.measure] - b[state.measure]);
   state.flows = out;
+  // renormalize to the largest flow currently shown, so a filtered selection
+  // (e.g. just tin) fills the full width/opacity range. deck.gl transitions the
+  // width/colour change smoothly (see the net layer's `transitions`).
+  let mv = 1, mw = 1;
+  for (const d of out) { if (d.v > mv) mv = d.v; if (d.w > mw) mw = d.w; }
+  state.viewMax = { v: mv, w: mw };
   updateStat(out);
+  if (STILL && deckgl) draw();  // no rAF loop in still mode — redraw on control change
 }
 
 // build the moving pulses for the current time — a stream per line, wrapping
@@ -263,10 +259,16 @@ function draw() {
     getPath: (d) => d.path,
     getColor: (d) => [...d.color, baseAlpha(d)],
     getWidth: (d) => widthFor(d),
-    widthUnits: "pixels", widthMinPixels: 0.5,
+    widthUnits: "pixels", widthMinPixels: 0.9,
     capRounded: true, jointRounded: true,
     parameters: { depthTest: false },
-    updateTriggers: { getColor: [state.measure], getWidth: [state.measure] },
+    // re-evaluate width/colour when the selection rescales (viewMax) or the
+    // measure flips, and glide the change over 400ms rather than snapping.
+    updateTriggers: {
+      getColor: [state.measure, state.viewMax[state.measure]],
+      getWidth: [state.measure, state.viewMax[state.measure]],
+    },
+    transitions: STILL ? {} : { getWidth: 400, getColor: 400 },
     pickable: true, onHover: onHover,
   });
 
@@ -399,6 +401,23 @@ function buildTimeline() {
     rebuildFlows();
   };
   if (years.length < 2) el("time-block").style.opacity = 0.4;
+}
+
+// the total is gross trade — hovering it explains the re-export/transit caveat
+function wireStatTooltip() {
+  const stat = el("stat"), tip = el("tooltip");
+  const show = (e) => {
+    tip.innerHTML =
+      `<div class="tt-note"><b>Gross trade.</b> This sums every recorded shipment, ` +
+      `so goods that transit a hub are counted more than once — e.g. crude oil ` +
+      `re-exported through Rotterdam appears as both an import to and an export ` +
+      `from the Netherlands. Flows are by country of shipment, not production origin.</div>`;
+    tip.style.left = e.clientX + "px";
+    tip.style.top = e.clientY + "px";
+    tip.hidden = false;
+  };
+  stat.onmouseenter = stat.onmousemove = show;
+  stat.onmouseleave = () => { tip.hidden = true; };
 }
 
 function wireMeasure() {
