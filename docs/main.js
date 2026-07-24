@@ -31,7 +31,8 @@ const state = {
   periodIdx: 0,
   measure: "v",
   hover: null,
-  viewMax: { v: 1, w: 1 }, // max flow among the CURRENTLY shown set → renormalized
+  viewMax: { v: 1, w: 1 },       // current (eased) normalization max
+  viewMaxTarget: { v: 1, w: 1 }, // target for the current selection; eased toward
   flows: [],
   time: 0,
 };
@@ -205,13 +206,14 @@ function rebuildFlows() {
   out.sort((a, b) => a[state.measure] - b[state.measure]);
   state.flows = out;
   // renormalize to the largest flow currently shown, so a filtered selection
-  // (e.g. just tin) fills the full width/opacity range. deck.gl transitions the
-  // width/colour change smoothly (see the net layer's `transitions`).
+  // (e.g. just tin) fills the full width/opacity range. The tick loop eases
+  // viewMax toward this target for a smooth rescale (no deck.gl attribute
+  // transitions — those break when the flow set changes on filter).
   let mv = 1, mw = 1;
   for (const d of out) { if (d.v > mv) mv = d.v; if (d.w > mw) mw = d.w; }
-  state.viewMax = { v: mv, w: mw };
+  state.viewMaxTarget = { v: mv, w: mw };
   updateStat(out);
-  if (STILL && deckgl) draw();  // no rAF loop in still mode — redraw on control change
+  if (STILL) { state.viewMax = { v: mv, w: mw }; if (deckgl) draw(); } // snap in still mode
 }
 
 // build the moving pulses for the current time — a stream per line, wrapping
@@ -268,7 +270,6 @@ function draw() {
       getColor: [state.measure, state.viewMax[state.measure]],
       getWidth: [state.measure, state.viewMax[state.measure]],
     },
-    transitions: STILL ? {} : { getWidth: 400, getColor: 400 },
     pickable: true, onHover: onHover,
   });
 
@@ -310,8 +311,19 @@ function tick(now) {
   const dt = Math.min(0.05, (now - lastT) / 1000);
   lastT = now;
   state.time += dt;
+  easeViewMax(dt);
   draw();
   requestAnimationFrame(tick);
+}
+
+// glide the normalization max toward the current selection's target so widths
+// and opacities rescale smoothly (frame-rate independent; snaps when close)
+function easeViewMax(dt) {
+  const k = 1 - Math.exp(-dt / 0.13);
+  for (const m of ["v", "w"]) {
+    const cur = state.viewMax[m], tgt = state.viewMaxTarget[m];
+    state.viewMax[m] = Math.abs(tgt - cur) < tgt * 0.005 ? tgt : cur + (tgt - cur) * k;
+  }
 }
 
 /* ---------- interaction ---------- */
